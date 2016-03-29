@@ -1,4 +1,5 @@
 #![feature(alloc, heap_api, coerce_unsized, unsize, specialization, unique, oom)]
+#![feature(unsafe_no_drop_flag, filling_drop)]
 extern crate alloc;
 use std::mem;
 use std::ptr::{self, Unique};
@@ -7,6 +8,7 @@ use alloc::heap;
 use std::ops::{CoerceUnsized, Deref, DerefMut};
 use std::marker::Unsize;
 
+#[unsafe_no_drop_flag]
 pub struct Grow<T: ?Sized> {
     _ptr: Unique<T>,
     _capacity: usize,
@@ -130,6 +132,18 @@ impl<T: ?Sized> Grow<T> {
     }
 }
 
+impl<T: ?Sized> Drop for Grow<T> {
+    fn drop(&mut self) {
+        if self._capacity > 0 && self._capacity != mem::POST_DROP_USIZE {
+            unsafe {
+                let align = mem::align_of_val(&**self._ptr);
+                ptr::drop_in_place(*self._ptr);
+                heap::deallocate(*self._ptr as *mut u8, self._capacity, align);
+            }
+        }
+    }
+}
+
 impl<T: ?Sized + Unsize<U>, U: ?Sized> CoerceUnsized<Grow<U>> for Grow<T> {}
 
 impl<T: ?Sized> Deref for Grow<T> {
@@ -201,5 +215,30 @@ mod tests {
     fn with_capacity() {
         let g: Grow<[i32; 3]> = Grow::with_capacity([1, 2, 3], 64);
         assert_eq!(g.capacity_bytes(), 64);
+    }
+
+    #[test]
+    fn dropping() {
+        struct Foo<'a> {
+            c: &'a mut i32,
+        }
+        impl<'a> Drop for Foo<'a> {
+            fn drop(&mut self) {
+                *self.c += 1;
+            }
+        }
+        let mut c = 0;
+        for i in 0..8 {
+            drop({
+                let foo = Grow::new(Foo { c: &mut c });
+                if i % 2 == 0 {
+                    drop(foo);
+                    None
+                } else {
+                    Some(foo)
+                }
+            });
+        }
+        assert_eq!(c, 8);
     }
 }
