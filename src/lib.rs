@@ -1,4 +1,4 @@
-#![feature(alloc, heap_api, coerce_unsized, unsize, specialization, unique, oom)]
+#![feature(alloc, heap_api, coerce_unsized, unsize, unique, oom)]
 #![feature(unsafe_no_drop_flag, filling_drop)]
 extern crate alloc;
 use std::mem;
@@ -222,11 +222,13 @@ mod tests {
         struct Foo<'a> {
             c: &'a mut i32,
         }
+
         impl<'a> Drop for Foo<'a> {
             fn drop(&mut self) {
                 *self.c += 1;
             }
         }
+
         let mut c = 0;
         for i in 0..8 {
             drop({
